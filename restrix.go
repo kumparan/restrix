@@ -2,6 +2,8 @@ package restrix
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -43,14 +45,69 @@ func NewBreaker(redisPool redis.Pool, settings CircuitSetting) Breaker {
 	}
 }
 
-type runFuncC func(context.Context) error
-
 type CircuitState string
 
 const (
-	CircuitStateClosed = "CLOSED"
-	CircuitStateOpened = "OPENED"
+	CircuitStateClosed     = "CLOSED"
+	CircuitStateOpened     = "OPENED"
+	CircuitStateHalfOpened = "HALF_OPENED"
 )
+
+// Do invoke function with breaker
+func (b Breaker) Do(ctx context.Context, name string, runFn func(ctx context.Context) error) error {
+	state, osTTL, err := b.init(name)
+	if err != nil {
+		return fmt.Errorf("restrix: %s", err.Error())
+	}
+	if state == CircuitStateOpened {
+		if osTTL > 0 {
+			return errors.New("restrix: circuit opened")
+		}
+		state = CircuitStateHalfOpened
+	}
+
+	reqCount, errCount, err := b.preRun(name)
+	if err != nil {
+		return fmt.Errorf("restrix: %s", err.Error())
+	}
+
+	err = runFn(ctx)
+	if err == nil {
+		if state != CircuitStateHalfOpened {
+			// nothing to do here if current state is Closed
+			return nil
+		}
+
+		// if current state is half opened, then switch state to close
+		err = b.flipClose(name)
+		if err != nil {
+			fmt.Printf("restrix: %s", err.Error())
+		}
+		return nil
+	}
+
+	var errPercentage int
+	if state == CircuitStateHalfOpened {
+		// reset osTTL if half opened
+		goto FlipOpen
+	}
+
+	errPercentage = errCount + 1/reqCount*100
+	if reqCount < b.requestCountThreshold && errPercentage < b.errorPercentThreshold {
+		err = b.recordError(name)
+		if err != nil {
+			fmt.Printf("restrix: %s", err.Error())
+		}
+		return nil
+	}
+
+FlipOpen:
+	err = b.flipOpen(name)
+	if err != nil {
+		fmt.Printf("restrix: %s", err.Error())
+	}
+	return nil
+}
 
 func (b Breaker) init(name string) (state CircuitState, openStateTTL time.Duration, err error) {
 	ns := newNamespacer(name)
@@ -81,7 +138,7 @@ func (b Breaker) init(name string) (state CircuitState, openStateTTL time.Durati
 	return CircuitState(res[1]), time.Duration(osTTL) * time.Second, err
 }
 
-func (b Breaker) preRun(name string) (state CircuitState, reqCount, errCount int, err error) {
+func (b Breaker) preRun(name string) (reqCount, errCount int, err error) {
 	ns := newNamespacer(name)
 
 	conn := b.redisPool.Get()
@@ -113,10 +170,6 @@ func (b Breaker) preRun(name string) (state CircuitState, reqCount, errCount int
 	if err != nil {
 		return
 	}
-	err = conn.Send("GET", ns.currentState())
-	if err != nil {
-		return
-	}
 
 	res, err := redis.Strings(conn.Do("EXEC"))
 	if err != nil {
@@ -126,7 +179,7 @@ func (b Breaker) preRun(name string) (state CircuitState, reqCount, errCount int
 	reqCount, _ = strconv.Atoi(res[4])
 	errCount, _ = strconv.Atoi(res[5])
 
-	return CircuitState(res[6]), reqCount, errCount, nil
+	return reqCount, errCount, nil
 }
 
 func (b Breaker) flipClose(name string) (err error) {
@@ -167,6 +220,35 @@ func (b Breaker) flipOpen(name string) (err error) {
 		return
 	}
 	err = conn.Send("EXPIRE", ns.openStateTTL(), b.sleepWindow, "NX")
+	if err != nil {
+		return
+	}
+	_, err = conn.Do("EXEC")
+
+	return
+}
+
+func (b Breaker) recordError(name string) (err error) {
+	ns := newNamespacer(name)
+
+	conn := b.redisPool.Get()
+	err = conn.Send("MULTI")
+	if err != nil {
+		return
+	}
+	err = conn.Send("SETNX", ns.requestCount(), 1)
+	if err != nil {
+		return
+	}
+	err = conn.Send("INCR", ns.errorCount())
+	if err != nil {
+		return
+	}
+	err = conn.Send("EXPIRE", ns.requestCount(), b.interval, "NX")
+	if err != nil {
+		return
+	}
+	err = conn.Send("EXPIRE", ns.errorCount(), b.interval, "NX")
 	if err != nil {
 		return
 	}
