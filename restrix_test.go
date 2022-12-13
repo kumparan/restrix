@@ -15,7 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestBreaker_Do(t *testing.T) {
+func TestBreaker_DoCtx(t *testing.T) {
 	mrServer, err := miniredis.Run()
 	require.NoError(t, err)
 	defer mrServer.Close()
