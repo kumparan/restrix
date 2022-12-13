@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 	"time"
 
 	"github.com/gomodule/redigo/redis"
@@ -12,7 +11,7 @@ import (
 
 // CircuitSetting is used to tune circuit settings at runtime
 type CircuitSetting struct {
-	// RequestCountThreshold is the minimum number of requests needed before a circuit can be tripped due to health
+	// RequestCountThreshold is the minimum number of requests needed cbefore a circuit can be tripped due to health
 	RequestCountThreshold int `json:"request_volume_threshold"`
 
 	// SleepWindow is how long to wait after a circuit opens before testing for recovery
@@ -27,7 +26,7 @@ type CircuitSetting struct {
 
 // Breaker object
 type Breaker struct {
-	redisPool redis.Pool
+	redisPool *redis.Pool
 
 	interval              time.Duration
 	requestCountThreshold int
@@ -35,7 +34,7 @@ type Breaker struct {
 	sleepWindow           time.Duration
 }
 
-func NewBreaker(redisPool redis.Pool, settings CircuitSetting) Breaker {
+func NewBreaker(redisPool *redis.Pool, settings CircuitSetting) Breaker {
 	return Breaker{
 		redisPool:             redisPool,
 		interval:              settings.Interval,
@@ -53,8 +52,8 @@ const (
 	CircuitStateHalfOpened = "HALF_OPENED"
 )
 
-// Do invoke function with breaker
-func (b Breaker) Do(ctx context.Context, name string, runFn func(ctx context.Context) error) error {
+// DoCtx invoke function with breaker with context
+func (b Breaker) DoCtx(ctx context.Context, name string, runFnCtx func(ctx context.Context) error) error {
 	state, osTTL, err := b.init(name)
 	if err != nil {
 		return fmt.Errorf("restrix: %s", err.Error())
@@ -71,7 +70,7 @@ func (b Breaker) Do(ctx context.Context, name string, runFn func(ctx context.Con
 		return fmt.Errorf("restrix: %s", err.Error())
 	}
 
-	err = runFn(ctx)
+	err = runFnCtx(ctx)
 	if err == nil {
 		if state != CircuitStateHalfOpened {
 			// nothing to do here if current state is Closed
@@ -129,13 +128,14 @@ func (b Breaker) init(name string) (state CircuitState, openStateTTL time.Durati
 	if err != nil {
 		return
 	}
-	res, err := redis.Strings(conn.Do("EXEC"))
+	res, err := redis.Values(conn.Do("EXEC"))
 	if err != nil {
 		return
 	}
 
-	osTTL, _ := strconv.Atoi(res[2])
-	return CircuitState(res[1]), time.Duration(osTTL) * time.Second, err
+	cstate := string(res[1].([]byte))
+	osTTL, _ := redis.Int(res[2], nil)
+	return CircuitState(cstate), time.Duration(osTTL) * time.Second, err
 }
 
 func (b Breaker) preRun(name string) (reqCount, errCount int, err error) {
@@ -150,15 +150,15 @@ func (b Breaker) preRun(name string) (reqCount, errCount int, err error) {
 	if err != nil {
 		return
 	}
-	err = conn.Send("SETNX", ns.errorCount(), 0)
+	err = conn.Send("SETNX", ns.errorCount(), 10)
 	if err != nil {
 		return
 	}
-	err = conn.Send("EXPIRE", ns.requestCount(), b.interval, "NX")
+	err = conn.Send("EXPIRE", ns.requestCount(), b.interval.Seconds(), "NX")
 	if err != nil {
 		return
 	}
-	err = conn.Send("EXPIRE", ns.errorCount(), b.interval, "NX")
+	err = conn.Send("EXPIRE", ns.errorCount(), b.interval.Seconds(), "NX")
 	if err != nil {
 		return
 	}
@@ -171,13 +171,13 @@ func (b Breaker) preRun(name string) (reqCount, errCount int, err error) {
 		return
 	}
 
-	res, err := redis.Strings(conn.Do("EXEC"))
+	res, err := redis.Values(conn.Do("EXEC"))
 	if err != nil {
 		return
 	}
 
-	reqCount, _ = strconv.Atoi(res[4])
-	errCount, _ = strconv.Atoi(res[5])
+	reqCount, _ = redis.Int(res[4], nil)
+	errCount, _ = redis.Int(res[5], nil)
 
 	return reqCount, errCount, nil
 }
@@ -219,7 +219,7 @@ func (b Breaker) flipOpen(name string) (err error) {
 	if err != nil {
 		return
 	}
-	err = conn.Send("EXPIRE", ns.openStateTTL(), b.sleepWindow, "NX")
+	err = conn.Send("EXPIRE", ns.openStateTTL(), b.sleepWindow.Seconds(), "NX")
 	if err != nil {
 		return
 	}
@@ -240,15 +240,19 @@ func (b Breaker) recordError(name string) (err error) {
 	if err != nil {
 		return
 	}
+	err = conn.Send("SETNX", ns.errorCount(), 0)
+	if err != nil {
+		return
+	}
 	err = conn.Send("INCR", ns.errorCount())
 	if err != nil {
 		return
 	}
-	err = conn.Send("EXPIRE", ns.requestCount(), b.interval, "NX")
+	err = conn.Send("EXPIRE", ns.requestCount(), b.interval.Seconds(), "NX")
 	if err != nil {
 		return
 	}
-	err = conn.Send("EXPIRE", ns.errorCount(), b.interval, "NX")
+	err = conn.Send("EXPIRE", ns.errorCount(), b.interval.Seconds(), "NX")
 	if err != nil {
 		return
 	}
