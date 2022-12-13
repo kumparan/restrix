@@ -91,8 +91,8 @@ func (b Breaker) DoCtx(ctx context.Context, name string, runFnCtx func(ctx conte
 		goto FlipOpen
 	}
 
-	errPercentage = errCount + 1/reqCount*100
-	if reqCount < b.requestCountThreshold && errPercentage < b.errorPercentThreshold {
+	errPercentage = (errCount + 1) / reqCount * 100
+	if reqCount < b.requestCountThreshold || errPercentage < b.errorPercentThreshold {
 		err = b.recordError(name)
 		if err != nil {
 			fmt.Printf("restrix: %s", err.Error())
@@ -150,7 +150,7 @@ func (b Breaker) preRun(name string) (reqCount, errCount int, err error) {
 	if err != nil {
 		return
 	}
-	err = conn.Send("SETNX", ns.errorCount(), 10)
+	err = conn.Send("SETNX", ns.errorCount(), 0)
 	if err != nil {
 		return
 	}
@@ -215,7 +215,7 @@ func (b Breaker) flipOpen(name string) (err error) {
 	if err != nil {
 		return
 	}
-	err = conn.Send("SET", ns.openStateTTL(), 1, b.sleepWindow)
+	err = conn.Send("SET", ns.openStateTTL(), 1)
 	if err != nil {
 		return
 	}
