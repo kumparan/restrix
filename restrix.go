@@ -225,6 +225,14 @@ func (b Breaker) flipClose(name string) (err error) {
 	if err != nil {
 		return
 	}
+	err = conn.Send("UNLINK", ns.requestCount())
+	if err != nil {
+		return
+	}
+	err = conn.Send("UNLINK", ns.errorCount())
+	if err != nil {
+		return
+	}
 	_, err = conn.Do("EXEC")
 
 	return
