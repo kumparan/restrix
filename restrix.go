@@ -9,32 +9,40 @@ import (
 	"github.com/gomodule/redigo/redis"
 )
 
-// CircuitSetting is used to tune circuit settings at runtime
-type CircuitSetting struct {
-	// RequestCountThreshold is the minimum number of requests needed cbefore a circuit can be tripped due to health
-	RequestCountThreshold int `json:"request_volume_threshold"`
+type (
+	// CircuitSettings is used to tune circuit settings at runtime
+	CircuitSettings struct {
+		// RequestCountThreshold is the minimum number of requests needed cbefore a circuit can be tripped due to health
+		RequestCountThreshold int `json:"request_volume_threshold"`
 
-	// SleepWindow is how long to wait after a circuit opens before testing for recovery
-	SleepWindow time.Duration `json:"sleep_window"`
+		// SleepWindow is how long to wait after a circuit opens before testing for recovery
+		SleepWindow time.Duration `json:"sleep_window"`
 
-	// ErrorPercentThreshold causes circuits to open once the rolling measure of errors exceeds this percent of requests
-	ErrorPercentThreshold int `json:"error_percent_threshold"`
+		// ErrorPercentThreshold causes circuits to open once the rolling measure of errors exceeds this percent of requests
+		ErrorPercentThreshold int `json:"error_percent_threshold"`
 
-	// Interval which error percentage is calculated
-	Interval time.Duration `json:"interval"`
-}
+		// Interval which error percentage is calculated
+		Interval time.Duration `json:"interval"`
+	}
+	// Breaker object
+	Breaker struct {
+		redisPool *redis.Pool
 
-// Breaker object
-type Breaker struct {
-	redisPool *redis.Pool
+		interval              time.Duration
+		requestCountThreshold int
+		errorPercentThreshold int
+		sleepWindow           time.Duration
+	}
+)
 
-	interval              time.Duration
-	requestCountThreshold int
-	errorPercentThreshold int
-	sleepWindow           time.Duration
-}
+const (
+	circuitStateClosed     = "CLOSED"
+	circuitStateOpened     = "OPENED"
+	circuitStateHalfOpened = "HALF_OPENED"
+)
 
-func NewBreaker(redisPool *redis.Pool, settings CircuitSetting) Breaker {
+// NewBreakerWithCustomSettings instantiate a new breaker with custom settings
+func NewBreakerWithCustomSettings(redisPool *redis.Pool, settings CircuitSettings) Breaker {
 	return Breaker{
 		redisPool:             redisPool,
 		interval:              settings.Interval,
@@ -44,13 +52,23 @@ func NewBreaker(redisPool *redis.Pool, settings CircuitSetting) Breaker {
 	}
 }
 
-type CircuitState string
+// NewBreaker with default settings
+func NewBreaker(redisPool *redis.Pool) Breaker {
+	var defaultCircuitSettings = CircuitSettings{
+		RequestCountThreshold: 10,
+		SleepWindow:           2 * time.Second,
+		ErrorPercentThreshold: 70,
+		Interval:              3 * time.Second,
+	}
 
-const (
-	CircuitStateClosed     = "CLOSED"
-	CircuitStateOpened     = "OPENED"
-	CircuitStateHalfOpened = "HALF_OPENED"
-)
+	return Breaker{
+		redisPool:             redisPool,
+		interval:              defaultCircuitSettings.Interval,
+		requestCountThreshold: defaultCircuitSettings.RequestCountThreshold,
+		errorPercentThreshold: defaultCircuitSettings.ErrorPercentThreshold,
+		sleepWindow:           defaultCircuitSettings.SleepWindow,
+	}
+}
 
 // DoCtx invoke function with breaker with context
 func (b Breaker) DoCtx(ctx context.Context, name string, runFnCtx func(ctx context.Context) error) error {
@@ -58,11 +76,11 @@ func (b Breaker) DoCtx(ctx context.Context, name string, runFnCtx func(ctx conte
 	if err != nil {
 		return fmt.Errorf("restrix: %s", err.Error())
 	}
-	if state == CircuitStateOpened {
+	if state == circuitStateOpened {
 		if osTTL > 0 {
 			return errors.New("restrix: circuit opened")
 		}
-		state = CircuitStateHalfOpened
+		state = circuitStateHalfOpened
 	}
 
 	reqCount, errCount, err := b.preRun(name)
@@ -72,7 +90,7 @@ func (b Breaker) DoCtx(ctx context.Context, name string, runFnCtx func(ctx conte
 
 	err = runFnCtx(ctx)
 	if err == nil {
-		if state != CircuitStateHalfOpened {
+		if state != circuitStateHalfOpened {
 			// nothing to do here if current state is Closed
 			return nil
 		}
@@ -86,7 +104,7 @@ func (b Breaker) DoCtx(ctx context.Context, name string, runFnCtx func(ctx conte
 	}
 
 	var errPercentage int
-	if state == CircuitStateHalfOpened {
+	if state == circuitStateHalfOpened {
 		// reset osTTL if half opened
 		goto FlipOpen
 	}
@@ -108,7 +126,7 @@ FlipOpen:
 	return nil
 }
 
-func (b Breaker) init(name string) (state CircuitState, openStateTTL time.Duration, err error) {
+func (b Breaker) init(name string) (state string, openStateTTL time.Duration, err error) {
 	ns := newNamespacer(name)
 
 	conn := b.redisPool.Get()
@@ -116,7 +134,7 @@ func (b Breaker) init(name string) (state CircuitState, openStateTTL time.Durati
 	if err != nil {
 		return
 	}
-	err = conn.Send("SETNX", ns.currentState(), CircuitStateClosed)
+	err = conn.Send("SETNX", ns.currentState(), circuitStateClosed)
 	if err != nil {
 		return
 	}
@@ -135,7 +153,7 @@ func (b Breaker) init(name string) (state CircuitState, openStateTTL time.Durati
 
 	cstate := string(res[1].([]byte))
 	osTTL, _ := redis.Int(res[2], nil)
-	return CircuitState(cstate), time.Duration(osTTL) * time.Second, err
+	return cstate, time.Duration(osTTL) * time.Second, err
 }
 
 func (b Breaker) preRun(name string) (reqCount, errCount int, err error) {
@@ -190,7 +208,7 @@ func (b Breaker) flipClose(name string) (err error) {
 	if err != nil {
 		return
 	}
-	err = conn.Send("SET", ns.currentState(), CircuitStateClosed)
+	err = conn.Send("SET", ns.currentState(), circuitStateClosed)
 	if err != nil {
 		return
 	}
@@ -211,7 +229,7 @@ func (b Breaker) flipOpen(name string) (err error) {
 	if err != nil {
 		return
 	}
-	err = conn.Send("SET", ns.currentState(), CircuitStateOpened)
+	err = conn.Send("SET", ns.currentState(), circuitStateOpened)
 	if err != nil {
 		return
 	}

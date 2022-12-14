@@ -21,7 +21,7 @@ func TestBreaker_DoCtx(t *testing.T) {
 	defer mrServer.Close()
 
 	mrAddr := mrServer.Addr()
-	circuitSetting := CircuitSetting{
+	circuitSetting := CircuitSettings{
 		RequestCountThreshold: 2,
 		SleepWindow:           10 * time.Second,
 		ErrorPercentThreshold: 50,
@@ -36,7 +36,7 @@ func TestBreaker_DoCtx(t *testing.T) {
 
 	t.Run("circuit closed", func(t *testing.T) {
 		myName := "success_test_case"
-		breaker := NewBreaker(redisPool, circuitSetting)
+		breaker := NewBreakerWithCustomSettings(redisPool, circuitSetting)
 
 		err = breaker.DoCtx(context.TODO(), myName, func(ctx context.Context) error {
 			return nil
@@ -50,13 +50,13 @@ func TestBreaker_DoCtx(t *testing.T) {
 
 		reply, err = mrServer.Get(ns.currentState())
 		require.NoError(t, err)
-		assert.Equal(t, CircuitStateClosed, reply)
+		assert.Equal(t, circuitStateClosed, reply)
 	})
 
 	t.Run("noflip - below request count threshold", func(t *testing.T) {
 		myName := "error_below_request_count_threshold"
 
-		breaker := NewBreaker(redisPool, circuitSetting)
+		breaker := NewBreakerWithCustomSettings(redisPool, circuitSetting)
 
 		err = breaker.DoCtx(context.TODO(), myName, func(ctx context.Context) error {
 			return errors.New("error nih")
@@ -74,13 +74,13 @@ func TestBreaker_DoCtx(t *testing.T) {
 
 		reply, err = mrServer.Get(ns.currentState())
 		require.NoError(t, err)
-		assert.Equal(t, CircuitStateClosed, reply)
+		assert.Equal(t, circuitStateClosed, reply)
 	})
 
 	t.Run("noflip - above request count threshold but below error percentage", func(t *testing.T) {
 		myName := "error_above_request_count_threshold_but_below_error_percentage"
 
-		breaker := NewBreaker(redisPool, CircuitSetting{
+		breaker := NewBreakerWithCustomSettings(redisPool, CircuitSettings{
 			RequestCountThreshold: 2,
 			SleepWindow:           10 * time.Second,
 			ErrorPercentThreshold: 50,
@@ -106,12 +106,12 @@ func TestBreaker_DoCtx(t *testing.T) {
 
 		reply, err = mrServer.Get(ns.currentState())
 		require.NoError(t, err)
-		assert.Equal(t, CircuitStateClosed, reply)
+		assert.Equal(t, circuitStateClosed, reply)
 	})
 
 	t.Run("flip open", func(t *testing.T) {
 		myName := "flip_open"
-		breaker := NewBreaker(redisPool, circuitSetting)
+		breaker := NewBreakerWithCustomSettings(redisPool, circuitSetting)
 
 		ns := newNamespacer(myName)
 		err = mrServer.Set(ns.requestCount(), "1")
@@ -131,7 +131,7 @@ func TestBreaker_DoCtx(t *testing.T) {
 
 		reply, err = mrServer.Get(ns.currentState())
 		require.NoError(t, err)
-		assert.Equal(t, CircuitStateOpened, reply)
+		assert.Equal(t, circuitStateOpened, reply)
 
 		ttl := mrServer.TTL(ns.openStateTTL())
 		assert.GreaterOrEqual(t, breaker.sleepWindow, ttl)
@@ -140,10 +140,10 @@ func TestBreaker_DoCtx(t *testing.T) {
 
 	t.Run("half open - still open", func(t *testing.T) {
 		myName := "half_open_noflip"
-		breaker := NewBreaker(redisPool, circuitSetting)
+		breaker := NewBreakerWithCustomSettings(redisPool, circuitSetting)
 
 		ns := newNamespacer(myName)
-		err = mrServer.Set(ns.currentState(), CircuitStateOpened)
+		err = mrServer.Set(ns.currentState(), circuitStateOpened)
 		require.NoError(t, err)
 
 		err = breaker.DoCtx(context.TODO(), myName, func(ctx context.Context) error {
@@ -153,7 +153,7 @@ func TestBreaker_DoCtx(t *testing.T) {
 
 		reply, err := mrServer.Get(ns.currentState())
 		require.NoError(t, err)
-		assert.Equal(t, CircuitStateOpened, reply)
+		assert.Equal(t, circuitStateOpened, reply)
 
 		ttl := mrServer.TTL(ns.openStateTTL())
 		assert.GreaterOrEqual(t, breaker.sleepWindow, ttl)
@@ -162,10 +162,10 @@ func TestBreaker_DoCtx(t *testing.T) {
 
 	t.Run("half open - flip close", func(t *testing.T) {
 		myName := "half_open_flip"
-		breaker := NewBreaker(redisPool, circuitSetting)
+		breaker := NewBreakerWithCustomSettings(redisPool, circuitSetting)
 
 		ns := newNamespacer(myName)
-		err = mrServer.Set(ns.currentState(), CircuitStateOpened)
+		err = mrServer.Set(ns.currentState(), circuitStateOpened)
 		require.NoError(t, err)
 
 		err = breaker.DoCtx(context.TODO(), myName, func(ctx context.Context) error {
@@ -175,6 +175,6 @@ func TestBreaker_DoCtx(t *testing.T) {
 
 		reply, err := mrServer.Get(ns.currentState())
 		require.NoError(t, err)
-		assert.Equal(t, CircuitStateClosed, reply)
+		assert.Equal(t, circuitStateClosed, reply)
 	})
 }
