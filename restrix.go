@@ -70,6 +70,15 @@ func NewBreaker(redisPool *redis.Pool) Breaker {
 	}
 }
 
+// Do invoke function with breaker without context
+func (b Breaker) Do(name string, runFn func() error) error {
+	runFnCtx := func(ctx context.Context) error {
+		return runFn()
+	}
+
+	return b.DoCtx(context.Background(), name, runFnCtx)
+}
+
 // DoCtx invoke function with breaker with context
 func (b Breaker) DoCtx(ctx context.Context, name string, runFnCtx func(ctx context.Context) error) error {
 	state, osTTL, err := b.init(name)
