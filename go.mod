@@ -1,4 +1,4 @@
-module restrix
+module github.com/kumparan/restrix
 
 go 1.18
 
