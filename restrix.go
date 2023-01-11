@@ -2,7 +2,6 @@ package restrix
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -87,7 +86,7 @@ func (b Breaker) DoCtx(ctx context.Context, name string, runFnCtx func(ctx conte
 	}
 	if state == circuitStateOpened {
 		if osTTL > 0 {
-			return errors.New("restrix: circuit opened")
+			return ErrCircuitOpened
 		}
 		state = circuitStateHalfOpened
 	}
