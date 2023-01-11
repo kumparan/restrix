@@ -61,7 +61,7 @@ func TestBreaker_DoCtx(t *testing.T) {
 		err = breaker.DoCtx(context.TODO(), myName, func(ctx context.Context) error {
 			return errors.New("error nih")
 		})
-		require.NoError(t, err)
+		require.Error(t, err)
 
 		ns := newNamespacer(myName)
 		reply, err := mrServer.Get(ns.requestCount())
@@ -94,7 +94,7 @@ func TestBreaker_DoCtx(t *testing.T) {
 		err = breaker.DoCtx(context.TODO(), myName, func(ctx context.Context) error {
 			return errors.New("error nih")
 		})
-		require.NoError(t, err)
+		require.Error(t, err)
 
 		reply, err := mrServer.Get(ns.requestCount())
 		require.NoError(t, err)
@@ -123,7 +123,7 @@ func TestBreaker_DoCtx(t *testing.T) {
 		err = breaker.DoCtx(context.TODO(), myName, func(ctx context.Context) error {
 			return errors.New("error nih")
 		})
-		require.NoError(t, err)
+		require.Error(t, err)
 
 		reply, err := mrServer.Get(ns.requestCount())
 		require.NoError(t, err)
@@ -149,7 +149,7 @@ func TestBreaker_DoCtx(t *testing.T) {
 		err = breaker.DoCtx(context.TODO(), myName, func(ctx context.Context) error {
 			return errors.New("error nih")
 		})
-		require.NoError(t, err)
+		require.Error(t, err)
 
 		reply, err := mrServer.Get(ns.currentState())
 		require.NoError(t, err)
