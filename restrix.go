@@ -255,6 +255,10 @@ func (b Breaker) flipOpen(name string) (err error) {
 	if err != nil {
 		return
 	}
+	err = conn.Send("SET", ns.lastOpenedAt(), time.Now().UTC().Unix())
+	if err != nil {
+		return
+	}
 	_, err = conn.Do("EXEC")
 
 	return

@@ -29,3 +29,7 @@ func (n namespacer) errorCount() string {
 func (n namespacer) openStateTTL() string {
 	return n.name + ":open_state_ttl"
 }
+
+func (n namespacer) lastOpenedAt() string {
+	return n.name + ":last_opened_at"
+}
