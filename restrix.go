@@ -118,6 +118,10 @@ func (b Breaker) DoCtx(ctx context.Context, name string, runFnCtx func(ctx conte
 	}
 
 	errPercentage = (errCount + 1) / reqCount * 100
+	fmt.Println("restrix: errCount", errCount)
+	fmt.Println("restrix: reqCount", reqCount)
+	fmt.Println("restrix: errPercentage", errPercentage)
+
 	if reqCount < b.requestCountThreshold || errPercentage < b.errorPercentThreshold {
 		if e := b.recordError(name); e != nil {
 			fmt.Printf("restrix: %s", e.Error())
