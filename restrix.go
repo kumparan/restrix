@@ -41,8 +41,8 @@ const (
 )
 
 // NewBreakerWithCustomSettings instantiate a new breaker with custom settings
-func NewBreakerWithCustomSettings(redisPool *redis.Pool, settings CircuitSettings) Breaker {
-	return Breaker{
+func NewBreakerWithCustomSettings(redisPool *redis.Pool, settings CircuitSettings) *Breaker {
+	return &Breaker{
 		redisPool:             redisPool,
 		interval:              settings.Interval,
 		requestCountThreshold: settings.RequestCountThreshold,
@@ -52,7 +52,7 @@ func NewBreakerWithCustomSettings(redisPool *redis.Pool, settings CircuitSetting
 }
 
 // NewBreaker with default settings
-func NewBreaker(redisPool *redis.Pool) Breaker {
+func NewBreaker(redisPool *redis.Pool) *Breaker {
 	var defaultCircuitSettings = CircuitSettings{
 		RequestCountThreshold: 10,
 		SleepWindow:           2 * time.Second,
@@ -60,7 +60,7 @@ func NewBreaker(redisPool *redis.Pool) Breaker {
 		Interval:              3 * time.Second,
 	}
 
-	return Breaker{
+	return &Breaker{
 		redisPool:             redisPool,
 		interval:              defaultCircuitSettings.Interval,
 		requestCountThreshold: defaultCircuitSettings.RequestCountThreshold,
