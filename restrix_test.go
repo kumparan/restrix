@@ -133,6 +133,10 @@ func TestBreaker_DoCtx(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, circuitStateOpened, reply)
 
+		reply, err = mrServer.Get(ns.lastOpenedAt())
+		require.NoError(t, err)
+		assert.NotEmpty(t, reply)
+
 		ttl := mrServer.TTL(ns.openStateTTL())
 		assert.GreaterOrEqual(t, breaker.sleepWindow, ttl)
 		assert.Greater(t, ttl, 0*time.Second)
