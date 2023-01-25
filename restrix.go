@@ -136,6 +136,8 @@ func (b Breaker) init(name string) (state string, openStateTTL time.Duration, er
 	ns := newNamespacer(name)
 
 	conn := b.redisPool.Get()
+	defer conn.Close()
+
 	err = conn.Send("MULTI")
 	if err != nil {
 		return
@@ -166,6 +168,8 @@ func (b Breaker) preRun(name string) (reqCount, errCount int, err error) {
 	ns := newNamespacer(name)
 
 	conn := b.redisPool.Get()
+	defer conn.Close()
+
 	err = conn.Send("MULTI")
 	if err != nil {
 		return
@@ -210,6 +214,8 @@ func (b Breaker) flipClose(name string) (err error) {
 	ns := newNamespacer(name)
 
 	conn := b.redisPool.Get()
+	defer conn.Close()
+
 	err = conn.Send("MULTI")
 	if err != nil {
 		return
@@ -239,6 +245,8 @@ func (b Breaker) flipOpen(name string) (err error) {
 	ns := newNamespacer(name)
 
 	conn := b.redisPool.Get()
+	defer conn.Close()
+
 	err = conn.Send("MULTI")
 	if err != nil {
 		return
@@ -268,6 +276,8 @@ func (b Breaker) recordError(name string) (err error) {
 	ns := newNamespacer(name)
 
 	conn := b.redisPool.Get()
+	defer conn.Close()
+	
 	err = conn.Send("MULTI")
 	if err != nil {
 		return
